@@ -8,6 +8,7 @@ using System.Web;
 using System.Web.Mvc;
 using ContosoUniversity.DAL;
 using contosoUniversity.Models;
+using PagedList;
 
 namespace contosoUniversity.Controllers
 {
@@ -16,9 +17,44 @@ namespace contosoUniversity.Controllers
         private SchoolContext db = new SchoolContext();
 
         // GET: Student
-        public ActionResult Index()
+        public ViewResult Index(string sortOrder, string currentFilter, string searchString, int?page)
         {
-            return View(db.Students.ToList());
+            ViewBag.CurrentSort = sortOrder;
+            ViewBag.NameSortParm = String.IsNullOrEmpty(sortOrder) ? "name_desc" : "";
+            ViewBag.DateSortParm = sortOrder == "Date" ? "date_desc" : "Date";
+            var students = from s in db.Students
+                           select s;
+            if(searchString != null)
+            {
+                page = 1;
+            }
+            else
+            {
+                searchString = currentFilter;
+            }
+            ViewBag.CurrentFilter = searchString;
+            if (!String.IsNullOrEmpty(searchString))
+            {
+                students = students.Where(s => s.LastName.Contains(searchString) || s.FirstMidName.Contains(searchString));
+            }
+            switch(sortOrder)
+            {
+                case "name_desc":
+                    students = students.OrderByDescending(s => s.LastName);
+                    break;
+                case "Date":
+                    students = students.OrderBy(s => s.EnrollmentDate);
+                    break;
+                case "date_desc":
+                    students = students.OrderByDescending(s => s.EnrollmentDate);
+                    break;
+                default: //name ascending
+                    students = students.OrderBy(s => s.LastName);
+                    break;
+            }
+            int pageSize = 3;
+            int pageNumber = (page ?? 1);
+            return View(students.ToPagedList(pageNumber,pageSize));
         }
         [ HttpPost]
         [ValidateAntiForgeryToken]
@@ -80,13 +116,18 @@ namespace contosoUniversity.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult Create([Bind(Include = "ID,LastName,FirstMidName,EnrollmentDate")] Student student)
         {
-            if (ModelState.IsValid)
-            {
-                db.Students.Add(student);
-                db.SaveChanges();
-                return RedirectToAction("Index");
+            try { 
+                 if (ModelState.IsValid)
+                {
+                     db.Students.Add(student);
+                     db.SaveChanges();
+                     return RedirectToAction("Index");
+                 }
             }
-
+            catch
+            {
+                ModelState.AddModelError("", "Unable to save changes.  Try again, and if the problem persists, see your system administrator.");
+            }
             return View(student);
         }
 
@@ -112,27 +153,39 @@ namespace contosoUniversity.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult Edit([Bind(Include = "ID,LastName,FirstMidName,EnrollmentDate")] Student student)
         {
-            if (ModelState.IsValid)
+             try { 
+                 if (ModelState.IsValid)
+                {
+                     db.Entry(student).State = EntityState.Modified;
+                     db.SaveChanges();
+                     return RedirectToAction("Index");
+                 }
+              }
+            catch
             {
-                db.Entry(student).State = EntityState.Modified;
-                db.SaveChanges();
-                return RedirectToAction("Index");
+                ModelState.AddModelError("", "Unable to save changes.  Try again, and if the problem persists, see your system administrator.");
             }
             return View(student);
         }
 
         // GET: Student/Delete/5
-        public ActionResult Delete(int? id)
+        public ActionResult Delete(int? id,bool? saveChangesError = false)
         {
             if (id == null)
-            {
+            {   
                 return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+
+
+            if (saveChangesError.GetValueOrDefault()){
+                ViewBag.ErrorMessage = "Delete failed.  Try Again, and if the problem persists, see your system administrator.";
             }
             Student student = db.Students.Find(id);
             if (student == null)
             {
                 return HttpNotFound();
             }
+
             return View(student);
         }
 
@@ -141,10 +194,17 @@ namespace contosoUniversity.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult DeleteConfirmed(int id)
         {
-            Student student = db.Students.Find(id);
-            db.Students.Remove(student);
-            db.SaveChanges();
-            return RedirectToAction("Index");
+            try
+            {
+                Student student = db.Students.Find(id);
+                db.Students.Remove(student);
+                db.SaveChanges();
+                return RedirectToAction("Index");
+            }
+            catch(DataException)
+            {
+                return RedirectToAction("Delete", new { id = id, saveChangesError = true });
+            }
         }
 
         protected override void Dispose(bool disposing)
